@@ -47,6 +47,113 @@ env:
   CONTAINER_TOOL: docker
 
 jobs:
+  release-v26-4-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      UPSTREAM_REGISTRY: ghcr.io/souleb/doca-platform
+      PACKAGE_SOURCES: "false"
+      SOURCE_REPO_V26_4_1: https://github.com/souleb/doca-platform.git
+      SOURCE_REF_V26_4_1: public-release-v26.4.1
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      # -----------------------------------------------------------------
+      # Clone the souleb/doca-platform fork at public-release-v26.4.1
+      # -----------------------------------------------------------------
+      - name: Clone source repository
+        run: |
+          git clone "${{ env.SOURCE_REPO_V26_4_1 }}" "$GITHUB_WORKSPACE/source"
+          cd "$GITHUB_WORKSPACE/source"
+          git checkout "${{ env.SOURCE_REF_V26_4_1 }}"
+        working-directory: ${{ github.workspace }}
+
+      - name: Resolve tag
+        run: |
+          echo "TAG=v26.4.1-beta.1" >> "$GITHUB_ENV"
+
+      - name: Verify checkout
+        run: |
+          echo "Repository : ${{ env.SOURCE_REPO_V26_4_1 }}"
+          echo "Ref        : ${{ env.SOURCE_REF_V26_4_1 }}"
+          echo "Tag        : ${{ env.TAG }}"
+          echo "Commit     : $(git rev-parse HEAD)"
+
+      # -----------------------------------------------------------------
+      # Toolchain
+      # -----------------------------------------------------------------
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: source/go.mod
+          cache-dependency-path: source/go.sum
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,amd64
+          image: tonistiigi/binfmt:qemu-v9.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache build tools and cloned repos
+        uses: actions/cache@v4
+        with:
+          path: |
+            source/hack/tools/bin
+            source/hack/repos
+          key: release-v26-4-1-tools-${{ runner.os }}-${{ hashFiles('source/hack/tools/tools.mk') }}
+          restore-keys: |
+            release-v26-4-1-tools-${{ runner.os }}-
+
+      # -----------------------------------------------------------------
+      # Build and push
+      # -----------------------------------------------------------------
+      - name: Build and push release
+        if: ${{ !inputs.dry_run }}
+        run: make release
+
+      - name: Build only (dry run)
+        if: ${{ inputs.dry_run }}
+        run: make release-build
+
+      # -----------------------------------------------------------------
+      # Summary
+      # -----------------------------------------------------------------
+      - name: Summary
+        if: always()
+        run: |
+          DRY="${{ inputs.dry_run }}"
+          echo "## Release ${{ env.TAG }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source: \`${{ env.SOURCE_REPO_V26_4_1 }}\` @ \`${{ env.SOURCE_REF_V26_4_1 }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: \`$(git rev-parse HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$DRY" == "true" ]]; then
+            echo "> **Dry run** — images and charts were built but NOT pushed." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "### Container images" >> "$GITHUB_STEP_SUMMARY"
+          echo "All images pushed to \`${{ env.REGISTRY }}\` with tag \`${{ env.TAG }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Helm charts" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed to \`${{ env.HELM_REGISTRY }}\`" >> "$GITHUB_STEP_SUMMARY"
+          ls -1 hack/charts/*.tgz 2>/dev/null | while read f; do
+            echo "- \`$(basename "$f")\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 120
