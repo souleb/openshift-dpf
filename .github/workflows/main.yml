@@ -69,6 +69,45 @@ jobs:
           git checkout "${{ env.SOURCE_REF_V26_4_1 }}"
         working-directory: ${{ github.workspace }}
 
+      - name: Patch hostdriver MFT download retry
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          dockerfile = Path("source/Dockerfile.hostdriver")
+          contents = dockerfile.read_text()
+
+          old = '''RUN case ${TARGETARCH} in \\
+                  amd64) ARCH=x86_64 ;; \\
+                  arm64) ARCH=arm64 ;; \\
+                  *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \\
+              esac && \\
+              curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-${ARCH}-deb.tgz | tar -xz -C /tmp && \\
+              cd /tmp/mft-${MFT_VERSION}-${ARCH}-deb && \\
+              ./install.sh --without-kernel'''
+
+          new = '''RUN case ${TARGETARCH} in \\
+                  amd64) ARCH=x86_64 ;; \\
+                  arm64) ARCH=arm64 ;; \\
+                  *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \\
+              esac && \\
+              curl -fL --retry 5 --retry-delay 5 --retry-all-errors \\
+                  --connect-timeout 30 --max-time 900 \\
+                  -o /tmp/mft.tgz \\
+                  https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-${ARCH}-deb.tgz && \\
+              gzip -t /tmp/mft.tgz && \\
+              tar -xzf /tmp/mft.tgz -C /tmp && \\
+              cd /tmp/mft-${MFT_VERSION}-${ARCH}-deb && \\
+              ./install.sh --without-kernel && \\
+              rm -rf /tmp/mft.tgz /tmp/mft-${MFT_VERSION}-${ARCH}-deb'''
+
+          if old not in contents:
+              raise SystemExit("expected Dockerfile.hostdriver MFT block not found")
+
+          dockerfile.write_text(contents.replace(old, new))
+          PY
+        working-directory: ${{ github.workspace }}
+
       - name: Resolve tag
         run: |
           echo "TAG=v26.4.1-beta.1" >> "$GITHUB_ENV"
@@ -172,6 +211,45 @@ jobs:
           git clone "${{ env.SOURCE_REPO }}" "$GITHUB_WORKSPACE/source"
           cd "$GITHUB_WORKSPACE/source"
           git checkout "${{ inputs.ref || 'public-release-v26.4' }}"
+        working-directory: ${{ github.workspace }}
+
+      - name: Patch hostdriver MFT download retry
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          dockerfile = Path("source/Dockerfile.hostdriver")
+          contents = dockerfile.read_text()
+
+          old = '''RUN case ${TARGETARCH} in \\
+                  amd64) ARCH=x86_64 ;; \\
+                  arm64) ARCH=arm64 ;; \\
+                  *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \\
+              esac && \\
+              curl -fsSL https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-${ARCH}-deb.tgz | tar -xz -C /tmp && \\
+              cd /tmp/mft-${MFT_VERSION}-${ARCH}-deb && \\
+              ./install.sh --without-kernel'''
+
+          new = '''RUN case ${TARGETARCH} in \\
+                  amd64) ARCH=x86_64 ;; \\
+                  arm64) ARCH=arm64 ;; \\
+                  *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \\
+              esac && \\
+              curl -fL --retry 5 --retry-delay 5 --retry-all-errors \\
+                  --connect-timeout 30 --max-time 900 \\
+                  -o /tmp/mft.tgz \\
+                  https://www.mellanox.com/downloads/MFT/mft-${MFT_VERSION}-${ARCH}-deb.tgz && \\
+              gzip -t /tmp/mft.tgz && \\
+              tar -xzf /tmp/mft.tgz -C /tmp && \\
+              cd /tmp/mft-${MFT_VERSION}-${ARCH}-deb && \\
+              ./install.sh --without-kernel && \\
+              rm -rf /tmp/mft.tgz /tmp/mft-${MFT_VERSION}-${ARCH}-deb'''
+
+          if old not in contents:
+              raise SystemExit("expected Dockerfile.hostdriver MFT block not found")
+
+          dockerfile.write_text(contents.replace(old, new))
+          PY
         working-directory: ${{ github.workspace }}
 
       - name: Resolve tag
